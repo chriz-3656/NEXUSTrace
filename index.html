@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Location Sharing — Single Send</title>
+  <meta name="description" content="Share device geolocation exactly once (consent required). Posts to /beacon.php" />
+  <style>
+    :root{
+      --bg:#0a0a0a; --card:#0f1113; --muted:#9aa0a6; --accent:#2ecc71;
+      --glass: rgba(255,255,255,0.03); --radius:12px;
+    }
+    html,body{height:100%}
+    body{
+      margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#050505,#0a0a0a);
+      color:#e6eef3;display:flex;align-items:center;justify-content:center;padding:24px;
+    }
+    .card{max-width:760px;width:100%;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));
+      padding:20px;border-radius:var(--radius);box-shadow:0 8px 30px rgba(2,6,23,0.6);border:1px solid rgba(255,255,255,0.03)}
+    h1{margin:0 0 8px 0;font-size:20px}
+    p.lead{margin:0 0 18px 0;color:var(--muted);font-size:13px}
+    .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    button.primary{background:linear-gradient(180deg,var(--accent),#27b85a);color:#04110a;border:0;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
+    button.primary[disabled]{opacity:.6;cursor:default}
+    #status{font-size:13px;color:var(--muted)}
+    #coords{margin-top:12px;background:var(--glass);padding:10px;border-radius:8px;font-family:monospace;color:#dff7e5}
+    a.maplink{display:inline-block;margin-top:8px;color:var(--accent);font-size:13px;text-decoration:none}
+    pre#debug{margin-top:12px;max-height:160px;overflow:auto;background:#050505;padding:10px;border-radius:8px;color:var(--muted);font-size:12px;white-space:pre-wrap}
+    details{margin-top:10px;color:var(--muted)}
+    label{font-size:13px;color:var(--muted)}
+    .small{font-size:12px;color:var(--muted)}
+    .reset { color: #f1c40f; cursor: pointer; text-decoration:underline; margin-left: 8px; font-size:12px }
+  </style>
+</head>
+<body>
+  <main class="card" role="main" aria-labelledby="title">
+    <h1 id="title">Share Location — Single Send</h1>
+    <p class="lead">Click <strong>Share My Location</strong> to allow the browser to send your device's exact coordinates to <code>/beacon.php</code>. This will only send once from this browser unless you reset it below.</p>
+
+    <div class="controls" role="region" aria-label="Location controls">
+      <button id="shareBtn" class="primary" type="button">Share My Location</button>
+      <div id="status" class="small">Status: idle</div>
+    </div>
+
+    <div id="coords" aria-live="polite" role="status" style="margin-top:12px">
+      Location: — 
+    </div>
+
+    <a id="map" class="maplink" href="#" target="_blank" rel="noopener" hidden>View on Google Maps</a>
+
+    <pre id="debug" hidden></pre>
+
+    <details>
+      <summary>Settings / advanced</summary>
+      <div style="margin-top:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <label class="small">Enable high accuracy:
+          <input id="highAcc" type="checkbox" checked>
+        </label>
+        <div style="margin-left:auto" class="small">Server endpoint: <code>/beacon.php</code></div>
+      </div>
+      <div style="margin-top:8px" class="small">
+        Privacy: the browser will ask for permission. If denied, the page will send a single <code>{ consent: false }</code> event to the server.
+        <span class="reset" id="resetShare" title="Allow sending again">Reset share</span>
+      </div>
+    </details>
+  </main>
+
+  <script>
+  /*
+    Single-send geolocation page
+    - Sends EXACT geolocation of this device/browser once (if user allows)
+    - Uses localStorage key 'location_shared_v1' to prevent repeated sends
+    - Posts JSON to /beacon.php with keys: consent, lat, lon, accuracy, ts
+    - Keeps the simple single-button UI
+  */
+
+  (function(){
+    const BEACON_URL = '/beacon.php';
+    const SHARE_KEY = 'location_shared_v1'; // localStorage key to mark that we already shared
+    const shareBtn = document.getElementById('shareBtn');
+    const statusEl = document.getElementById('status');
+    const coordsEl = document.getElementById('coords');
+    const mapEl = document.getElementById('map');
+    const debugEl = document.getElementById('debug');
+    const highAccCheckbox = document.getElementById('highAcc');
+    const resetEl = document.getElementById('resetShare');
+
+    // helper: show debug (unhide on first write)
+    function logDebug(msg){
+      if (debugEl.hidden) debugEl.hidden = false;
+      const t = new Date().toLocaleTimeString();
+      debugEl.textContent += `[${t}] ${msg}\n`;
+      debugEl.scrollTop = debugEl.scrollHeight;
+      console.debug(msg);
+    }
+
+    // check if already sent from this browser
+    function alreadyShared(){
+      try {
+        return localStorage.getItem(SHARE_KEY) === '1';
+      } catch (e) {
+        // localStorage might be disabled; treat as not shared
+        console.warn('localStorage unavailable', e);
+        return false;
+      }
+    }
+
+    // mark as shared
+    function markShared(){
+      try {
+        localStorage.setItem(SHARE_KEY, '1');
+      } catch (e) {
+        console.warn('localStorage set failed', e);
+      }
+    }
+
+    // enable share button if not already shared
+    function initUI(){
+      if (alreadyShared()){
+        shareBtn.disabled = true;
+        shareBtn.textContent = 'Already shared';
+        statusEl.textContent = 'Status: location already shared from this browser';
+      } else {
+        shareBtn.disabled = false;
+        shareBtn.textContent = 'Share My Location';
+        statusEl.textContent = 'Status: idle';
+      }
+      mapEl.hidden = true;
+      debugEl.hidden = true;
+      coordsEl.textContent = 'Location: —';
+    }
+
+    // send consent:false event when user denies or geolocation unavailable
+    async function sendConsentFalse(){
+      try {
+        const res = await fetch(BEACON_URL, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ consent: false, ts: new Date().toISOString() }),
+          credentials: 'omit'
+        });
+        const text = await res.text();
+        logDebug(`Consent:false → ${res.status} ${text}`);
+        // mark as shared so we don't spam repeated denials either
+        markShared();
+        shareBtn.disabled = true;
+        shareBtn.textContent = 'Already shared';
+        statusEl.textContent = 'Status: permission denied (consent sent)';
+      } catch (err) {
+        logDebug('Error sending consent:false — ' + err.message);
+        statusEl.textContent = 'Status: error sending consent:false';
+      }
+    }
+
+    // main one-shot getCurrentPosition + send
+    function shareOnce(){
+      if (!navigator.geolocation){
+        statusEl.textContent = 'Status: geolocation not supported';
+        return;
+      }
+      if (alreadyShared()){
+        statusEl.textContent = 'Status: already shared from this browser';
+        shareBtn.disabled = true;
+        return;
+      }
+
+      statusEl.textContent = 'Status: requesting permission…';
+      shareBtn.disabled = true;
+
+      const opts = {
+        enableHighAccuracy: !!highAccCheckbox.checked,
+        maximumAge: 0,
+        timeout: 20000
+      };
+
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        // update UI
+        const c = pos.coords;
+        coordsEl.textContent = `Location: ${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)} (±${Math.round(c.accuracy)} m)`;
+        mapEl.hidden = false;
+        mapEl.href = `https://maps.google.com/?q=${c.latitude},${c.longitude}`;
+        mapEl.textContent = `View on Google Maps: ${c.latitude.toFixed(6)},${c.longitude.toFixed(6)}`;
+        statusEl.textContent = 'Status: sending location…';
+        logDebug(`Got position: lat=${c.latitude}, lon=${c.longitude}, acc=${c.accuracy}`);
+
+        // prepare payload (same JSON shape as before)
+        const payload = {
+          consent: true,
+          lat: c.latitude,
+          lon: c.longitude,
+          accuracy: c.accuracy,
+          ts: new Date().toISOString()
+        };
+
+        try {
+          const res = await fetch(BEACON_URL, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload),
+            credentials: 'omit'
+          });
+          const text = await res.text();
+          logDebug(`POST ${BEACON_URL} → ${res.status} ${text}`);
+          if (res.ok) {
+            statusEl.textContent = 'Status: location shared ✔️';
+          } else {
+            statusEl.textContent = `Status: server ${res.status}`;
+          }
+        } catch (err) {
+          logDebug('Fetch error: ' + err.message);
+          statusEl.textContent = 'Status: send error';
+        } finally {
+          // mark as shared (either success or at least attempted) to ensure single-send behavior
+          markShared();
+          shareBtn.disabled = true;
+          shareBtn.textContent = 'Already shared';
+        }
+      }, (err) => {
+        // permission denied or other error
+        logDebug('Geolocation error: ' + err.message);
+        // send consent:false once
+        sendConsentFalse();
+      }, opts);
+    }
+
+    // reset localStorage flag (for testing)
+    function resetShare(){
+      try {
+        localStorage.removeItem(SHARE_KEY);
+        initUI();
+        logDebug('Reset: localStorage flag cleared');
+      } catch (e) {
+        logDebug('Reset failed: ' + e.message);
+      }
+    }
+
+    // wire up
+    shareBtn.addEventListener('click', shareOnce);
+    resetEl.addEventListener('click', (e) => { e.preventDefault(); if (confirm('Reset share flag so this browser can share again?')) resetShare(); });
+
+    // initial render
+    initUI();
+
+  })();
+  </script>
+</body>
+</html>
