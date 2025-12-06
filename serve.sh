@@ -38,7 +38,7 @@ echo -e "${CYA}${BOLD}
 ${YLW}                   N  E  X  U  S  T  R  A  C  E${RST}
 ${MAG}           ─────────────────────────────────────────────${RST}
 ${GRN}             Global Geolocation Beacon • Ethical Only${RST}
-${CYA}                  by Chriz • SKY TECH&CRAFTS${RST}
+${CYA}                  by CHRIZ • SKY TECH&CRAFTS${RST}
 "
 
 ###########################################
