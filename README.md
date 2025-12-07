@@ -139,7 +139,7 @@ Not allowed:
 
 ## 📜 License  
 GNU GENERAL PUBLIC LICENSE  
-
+This project uses the GNU GPL license to ensure all derivative works remain open-source and transparent, in alignment with ethical security research.
 ---
 
 ## 🌟 Author  
