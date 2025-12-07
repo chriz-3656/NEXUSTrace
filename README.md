@@ -49,7 +49,7 @@ NEXUSTrace/
 ├── cleanup.sh
 ├── index.html
 ├── beacon.php
-├── cloudflared
+├── cloudflared(will be autodownload)
 ├── capture/
 │   └── nexustrace.log
 └── README.md
