@@ -138,7 +138,7 @@ Not allowed:
 ---
 
 ## 📜 License  
-MIT License  
+GNU GENERAL PUBLIC LICENSE  
 
 ---
 
