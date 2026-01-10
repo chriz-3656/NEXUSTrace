@@ -5,29 +5,26 @@
 # ==============================
 
 # --- Safe Color Initialization ---
-init_colors() {
-  if command -v tput >/dev/null 2>&1; then
-    GREEN=$(tput setaf 2)
-    RED=$(tput setaf 1)
-    CYAN=$(tput setaf 6)
-    YELLOW=$(tput setaf 3)
-    BLUE=$(tput setaf 4)
-    MAGENTA=$(tput setaf 5)
-    RESET=$(tput sgr0)
-    BOLD=$(tput bold)
-  else
-    # Fallback ANSI codes for Termux without tput
-    GREEN="\e[32m"
-    RED="\e[31m"
-    CYAN="\e[36m"
-    YELLOW="\e[33m"
-    BLUE="\e[34m"
-    MAGENTA="\e[35m"
-    RESET="\e[0m"
-    BOLD="\e[1m"
-  fi
-}
-init_colors
+if command -v tput >/dev/null 2>&1; then
+  GREEN=$(tput setaf 2)
+  RED=$(tput setaf 1)
+  CYAN=$(tput setaf 6)
+  YELLOW=$(tput setaf 3)
+  BLUE=$(tput setaf 4)
+  MAGENTA=$(tput setaf 5)
+  RESET=$(tput sgr0)
+  BOLD=$(tput bold)
+else
+  # Fallback ANSI codes for Termux without tput
+  GREEN="\e[32m"
+  RED="\e[31m"
+  CYAN="\e[36m"
+  YELLOW="\e[33m"
+  BLUE="\e[34m"
+  MAGENTA="\e[35m"
+  RESET="\e[0m"
+  BOLD="\e[1m"
+fi
 
 clear
 
@@ -46,39 +43,32 @@ echo -e "${YELLOW}${BOLD}N E X U S T R A C E${RESET}"
 echo -e "${GREEN}Global Geolocation Beacon · Ethical Only${RESET}"
 echo -e "${GREEN}by CHRIZ · SKY TECH&CRAFTS${RESET}"
 
-# --- Platform Detection ---
-detect_platform() {
-  if [ -n "$ANDROID_ROOT" ] || [ -d "/system/bin" ]; then
-    PLATFORM="termux"
-    OS_NAME="android"
-    ARCH_RAW=$(getprop ro.product.cpu.abi)
-  elif [ "$(uname -s)" = "Linux" ]; then
-    if grep -qi microsoft /proc/version 2>/dev/null; then
-      PLATFORM="wsl"
-    else
-      PLATFORM="linux"
-    fi
-    OS_NAME="linux"
-    ARCH_RAW=$(uname -m)
+# --- Platform & Architecture Detection ---
+if [ -n "$ANDROID_ROOT" ] || [ -d "/system/bin" ]; then
+  PLATFORM="termux"
+  OS_NAME="android"
+  ARCH_RAW=$(getprop ro.product.cpu.abi)
+elif [ "$(uname -s)" = "Linux" ]; then
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    PLATFORM="wsl"
   else
-    echo -e "${RED}[!] Unsupported platform.$RESET" >&2
-    exit 1
+    PLATFORM="linux"
   fi
-}
+  OS_NAME="linux"
+  ARCH_RAW=$(uname -m)
+else
+  echo -e "${RED}[!] Unsupported platform.$RESET" >&2
+  exit 1
+fi
 
-# --- Architecture Mapping ---
-map_arch() {
-  case "$ARCH_RAW" in
-    x86_64 | amd64) ARCH_CF="amd64" ;;
-    aarch64 | arm64) ARCH_CF="arm64" ;;
-    armv7l | armv8l | armeabi-v7a | armeabi) ARCH_CF="arm" ;;
-    i386 | i686) ARCH_CF="386" ;;
-    *) echo -e "${RED}[!] Unsupported architecture: $ARCH_RAW$RESET" >&2; exit 1 ;;
-  esac
-}
-
-detect_platform
-map_arch
+# Map raw arch to Cloudflare's naming
+case "$ARCH_RAW" in
+  x86_64 | amd64) ARCH_CF="amd64" ;;
+  aarch64 | arm64) ARCH_CF="arm64" ;;
+  armv7l | armv8l | armeabi-v7a | armeabi) ARCH_CF="arm" ;;
+  i386 | i686) ARCH_CF="386" ;;
+  *) echo -e "${RED}[!] Unsupported architecture: $ARCH_RAW$RESET" >&2; exit 1 ;;
+esac
 
 echo -e "${YELLOW}[*] Detected Platform: $PLATFORM ($OS_NAME-$ARCH_CF)$RESET"
 
