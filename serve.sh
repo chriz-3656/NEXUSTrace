@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# =========================================
-# NEXUSTrace — Portable Live Monitor
-# Ethical Use Only · Linux | WSL | Termux
-# =========================================
+# ==================================================
+# NEXUSTrace — Unified Portable Launcher
+# Ethical Use Only
+# Platforms: Linux | WSL | Termux | macOS
+# ==================================================
 
-set -e
+set +e
 
-# ---------- Colors (safe for Termux) ----------
+# --------------------------------------------------
+# Colors (safe everywhere)
+# --------------------------------------------------
 if command -v tput >/dev/null 2>&1; then
   GREEN=$(tput setaf 2)
   RED=$(tput setaf 1)
@@ -29,7 +32,9 @@ fi
 
 clear
 
-# ---------- Banner ----------
+# --------------------------------------------------
+# Banner
+# --------------------------------------------------
 echo -e "${CYAN}${BOLD}"
 cat << "EOF"
 ███╗   ██╗   ████████╗██████╗  █████╗  ██████╗███████╗
@@ -44,114 +49,112 @@ echo -e "${YELLOW}${BOLD}N E X U S T R A C E${RESET}"
 echo -e "${GREEN}Global Geolocation Beacon · Ethical Only${RESET}"
 echo -e "${GREEN}by CHRIZ · SKY TECH&CRAFTS${RESET}\n"
 
-# =========================================
-# Utility functions
-# =========================================
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+die() { echo -e "${RED}[!] $1${RESET}" >&2; exit 1; }
+info() { echo -e "${CYAN}[*] $1${RESET}"; }
+ok() { echo -e "${GREEN}[✓] $1${RESET}"; }
 
-die() {
-  echo -e "${RED}[!] $1${RESET}" >&2
-  exit 1
-}
-
-info() {
-  echo -e "${CYAN}[*] $1${RESET}"
-}
-
-ok() {
-  echo -e "${GREEN}[✓] $1${RESET}"
-}
-
-# =========================================
+# --------------------------------------------------
 # Platform & architecture detection
-# =========================================
-
+# --------------------------------------------------
 detect_platform() {
+  UNAME_S=$(uname -s)
+  UNAME_M=$(uname -m)
+
   if [ -n "$ANDROID_ROOT" ] || [ -d "/system/bin" ]; then
     PLATFORM="termux"
     OS_NAME="linux"
-    ARCH_RAW=$(uname -m)
+    ARCH_RAW="$UNAME_M"
   elif grep -qi microsoft /proc/version 2>/dev/null; then
     PLATFORM="wsl"
     OS_NAME="linux"
-    ARCH_RAW=$(uname -m)
-  elif [ "$(uname -s)" = "Linux" ]; then
+    ARCH_RAW="$UNAME_M"
+  elif [ "$UNAME_S" = "Linux" ]; then
     PLATFORM="linux"
     OS_NAME="linux"
-    ARCH_RAW=$(uname -m)
+    ARCH_RAW="$UNAME_M"
+  elif [ "$UNAME_S" = "Darwin" ]; then
+    PLATFORM="mac"
+    OS_NAME="darwin"
+    ARCH_RAW="$UNAME_M"
   else
     die "Unsupported platform"
   fi
 
   case "$ARCH_RAW" in
-    x86_64 | amd64)
-      ARCH_CF="amd64"
-      ;;
-    aarch64 | arm64 | arm64-v8a)
-      ARCH_CF="arm64"
-      ;;
-    armv7l | armeabi-v7a | armeabi)
-      ARCH_CF="arm"
-      ;;
-    i386 | i686)
-      ARCH_CF="386"
-      ;;
-    *)
-      die "Unsupported architecture: $ARCH_RAW"
-      ;;
+    x86_64 | amd64) ARCH_CF="amd64" ;;
+    aarch64 | arm64 | arm64-v8a) ARCH_CF="arm64" ;;
+    armv7l | armeabi-v7a | armeabi) ARCH_CF="arm" ;;
+    i386 | i686) ARCH_CF="386" ;;
+    *) die "Unsupported architecture: $ARCH_RAW" ;;
   esac
 
   info "Detected platform: $PLATFORM ($OS_NAME-$ARCH_CF)"
 }
 
-# =========================================
-# Dependency checks
-# =========================================
-
+# --------------------------------------------------
+# Dependency check
+# --------------------------------------------------
 require_cmd() {
   local cmd="$1"
   local pkg="$2"
 
   if ! command -v "$cmd" >/dev/null 2>&1; then
     if [ "$PLATFORM" = "termux" ]; then
-      info "Installing $pkg for Termux..."
+      info "Installing $pkg (Termux)..."
       pkg install "$pkg" -y || die "Failed to install $pkg"
+    elif [ "$PLATFORM" = "mac" ]; then
+      die "$cmd not found. Install it via: brew install $pkg"
     else
-      die "$cmd not found. Please install it manually."
+      die "$cmd not found. Install it using your package manager."
     fi
   fi
 }
 
-# =========================================
-# Cloudflared setup
-# =========================================
-
+# --------------------------------------------------
+# Cloudflared setup (safe verification)
+# --------------------------------------------------
 setup_cloudflared() {
   CLOUDFLARED="./cloudflared"
-  CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$ARCH_CF"
+
+  if [ "$PLATFORM" = "mac" ]; then
+    CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-$ARCH_CF"
+  else
+    CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$ARCH_CF"
+  fi
 
   if [ ! -f "$CLOUDFLARED" ]; then
-    info "Downloading cloudflared ($ARCH_CF)..."
+    info "Downloading cloudflared ($OS_NAME-$ARCH_CF)..."
     curl -fsSL "$CF_URL" -o "$CLOUDFLARED" || die "Cloudflared download failed"
     chmod +x "$CLOUDFLARED"
   fi
 
-  "$CLOUDFLARED" --version >/dev/null 2>&1 || die "Cloudflared verification failed"
-  ok "Cloudflared ready"
+  [ -x "$CLOUDFLARED" ] || die "Cloudflared is not executable"
+
+  if command -v file >/dev/null 2>&1; then
+    if [ "$PLATFORM" = "mac" ]; then
+      file "$CLOUDFLARED" | grep -qi "Mach-O" || die "Invalid macOS binary"
+    else
+      file "$CLOUDFLARED" | grep -qi "ELF" || die "Invalid Linux binary"
+    fi
+  fi
+
+  ok "Cloudflared binary ready"
 }
 
-# =========================================
+# --------------------------------------------------
 # Runtime config
-# =========================================
-
+# --------------------------------------------------
 HOST="127.0.0.1"
 PORT="8080"
 CAPTURE_LOG="capture/nexustrace.log"
 TUNNEL_LOG="tunnel_silent.log"
 
-# =========================================
-# Cleanup handler
-# =========================================
-
+# --------------------------------------------------
+# Cleanup
+# --------------------------------------------------
 cleanup() {
   echo -e "\n${RED}${BOLD}Stopping NEXUSTrace...${RESET}"
   kill "$PHP_PID" 2>/dev/null || true
@@ -163,10 +166,9 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-# =========================================
-# Main execution
-# =========================================
-
+# --------------------------------------------------
+# Main
+# --------------------------------------------------
 detect_platform
 
 require_cmd bash bash
@@ -195,10 +197,9 @@ ok "Tunnel started"
 PUBLIC_URL=$(sed -n 's/.*\(https:\/\/[a-zA-Z0-9.-]*\.trycloudflare\.com\).*/\1/p' "$TUNNEL_LOG" | head -n1)
 [ -n "$PUBLIC_URL" ] && echo -e "${CYAN}${BOLD}[*] Public URL:${RESET} ${GREEN}$PUBLIC_URL${RESET}"
 
-# =========================================
+# --------------------------------------------------
 # Live monitor
-# =========================================
-
+# --------------------------------------------------
 echo -e "\n${BLUE}${BOLD}📡 LIVE CAPTURE MONITOR${RESET}"
 echo -e "${BLUE}════════════════════════════════════════${RESET}"
 
